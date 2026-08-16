@@ -49,9 +49,15 @@ export default function TamperTestPanel({ evalType }) {
                 <span className={`status inline ${pass ? "ok" : "fail"}`}>
                   {r.error
                     ? `✗ error: ${r.error}`
-                    : r.valid
-                    ? "✓ VERIFIED"
-                    : `✗ ${s.expect === "TAMPERED" ? "TAMPER DETECTED" : "VERIFICATION FAILED"}`}
+                    : pass
+                    ? s.expect === "VALID"
+                      ? "✓ VERIFIED"
+                      : s.expect === "TAMPERED"
+                      ? "✓ TAMPER DETECTED"
+                      : "✓ REJECTED (INVALID)"
+                    : s.expect === "VALID"
+                    ? "✗ VERIFICATION FAILED"
+                    : "✗ UNEXPECTEDLY VALID"}
                 </span>
               )}
               {r?.reasons?.length > 0 && <div className="reasons small">{r.reasons.join(" | ")}</div>}
