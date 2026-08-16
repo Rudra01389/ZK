@@ -411,9 +411,7 @@ dd { margin: 0; font-size: 0.9rem; color: var(--text-primary); }
 
 .scenario-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
 }
 
@@ -423,6 +421,7 @@ dd { margin: 0; font-size: 0.9rem; color: var(--text-primary); }
   font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.05em;
+  white-space: nowrap;
 }
 
 /* Loaders */

@@ -52,16 +52,16 @@ export default function TamperTestPanel({ evalType }) {
               transition={{ delay: index * 0.05 }}
             >
               <div className="scenario-header">
-                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                  <s.icon size={18} style={{ color: 'var(--text-secondary)' }} />
-                  <strong style={{ fontSize: '0.95rem' }}>{s.label}</strong>
-                  <span className="expect">Expects: {s.expect}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', justifyContent: 'flex-start' }}>
+                  <s.icon size={18} style={{ color: 'var(--text-secondary)', flexShrink: 0 }} />
+                  <strong style={{ fontSize: '0.95rem', whiteSpace: 'nowrap' }}>{s.label}</strong>
+                  <span className="expect" style={{ marginLeft: '4px' }}>Expects: {s.expect}</span>
                 </div>
                 
                 <button 
                   onClick={() => runScenario(s.key)} 
                   disabled={running === s.key}
-                  style={{ minWidth: '120px' }}
+                  style={{ minWidth: '120px', flexShrink: 0, marginLeft: 'auto' }}
                 >
                   {running === s.key ? (
                     <><Loader2 className="loader" size={16} /> Running</>
