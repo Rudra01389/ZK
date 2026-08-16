@@ -411,6 +411,56 @@ dd { margin: 0; font-size: 0.9rem; color: var(--text-primary); }
   font-family: 'Space Mono', monospace;
 }
 
+/* Terminal Logger */
+.terminal-container {
+  margin-top: 24px;
+  background: #000;
+  border: 1px solid var(--panel-border);
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background: #09090b;
+  border-bottom: 1px solid var(--panel-border);
+  color: var(--text-muted);
+}
+.terminal-clear {
+  background: transparent;
+  border: none;
+  padding: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.terminal-clear:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+.terminal-body {
+  padding: 12px;
+  min-height: 120px;
+  max-height: 300px;
+  overflow-y: auto;
+  font-family: 'Space Mono', monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+.terminal-line {
+  word-break: break-all;
+  margin-bottom: 4px;
+}
+.terminal-prompt {
+  color: var(--success);
+  margin-right: 8px;
+  user-select: none;
+}
+
 /* Loaders */
 .loader {
   animation: spin 1s linear infinite;

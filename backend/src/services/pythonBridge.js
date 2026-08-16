@@ -1,6 +1,9 @@
 const { spawn } = require("child_process");
 const path = require("path");
+const EventEmitter = require("events");
 const { VENV_PYTHON, ML_CIRCUIT_DIR, ML_DIR } = require("./paths");
+
+const logEmitter = new EventEmitter();
 
 /**
  * Runs one of the ml/circuit/*.py CLI scripts, which each accept a single
@@ -23,8 +26,17 @@ function runPythonScript(scriptName, payloadOrArgs, { timeoutMs = 120000, baseDi
       reject(new Error(`${scriptName} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.stdout.on("data", (d) => {
+      const chunk = d.toString();
+      stdout += chunk;
+      logEmitter.emit("log", chunk);
+    });
+    
+    child.stderr.on("data", (d) => {
+      const chunk = d.toString();
+      stderr += chunk;
+      logEmitter.emit("log", chunk);
+    });
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -55,4 +67,4 @@ function runPythonScript(scriptName, payloadOrArgs, { timeoutMs = 120000, baseDi
   });
 }
 
-module.exports = { runPythonScript };
+module.exports = { runPythonScript, logEmitter };

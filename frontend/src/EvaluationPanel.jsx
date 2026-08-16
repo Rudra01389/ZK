@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "./api";
 import { motion, AnimatePresence } from "framer-motion";
 import { Cpu, RefreshCcw, Check, X, FileText, Loader2, Sparkles, Hash, Clock, FileBadge } from "lucide-react";
+import TerminalLogger from "./TerminalLogger";
 
 const NUM_QUESTIONS = 20;
 const OPTIONS = ["A", "B", "C", "D"];
@@ -199,6 +200,9 @@ export default function EvaluationPanel({ evaluatorInfo, evalType, setEvalType, 
           </dl>
         </motion.div>
       )}
+
+      {/* Live Computation Logger fills the blank space below */}
+      <TerminalLogger />
     </section>
   );
 }
