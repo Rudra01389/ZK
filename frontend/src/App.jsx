@@ -3,6 +3,8 @@ import { api } from "./api";
 import EvaluationPanel from "./EvaluationPanel";
 import VerificationPanel from "./VerificationPanel";
 import TamperTestPanel from "./TamperTestPanel";
+import { motion } from "framer-motion";
+import { Activity, CheckCircle2, XCircle, ShieldCheck, Box } from "lucide-react";
 import "./App.css";
 
 function App() {
@@ -23,35 +25,71 @@ function App() {
     api.modelCommitment(evalType).then(setCommitment).catch(() => {});
   }, [evalType]);
 
+  const containerVariants = {
+    hidden: { opacity: 0 },
+    visible: { 
+      opacity: 1,
+      transition: { staggerChildren: 0.1 }
+    }
+  };
+
+  const itemVariants = {
+    hidden: { y: 20, opacity: 0 },
+    visible: { y: 0, opacity: 1, transition: { type: "spring", stiffness: 100 } }
+  };
+
   return (
     <div className="app">
-      <header>
+      <motion.header
+        initial={{ opacity: 0, y: -20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+      >
         <h1>CertiProof</h1>
         <p className="tagline">Cryptographically Verifiable AI-Based Exam Evaluation</p>
         <p className="muted">
           Zero-knowledge proof layer (EZKL / Halo2) proves the certified model produced the claimed score, without
           revealing model weights or the candidate's raw answers. A separate hash-linked audit layer detects
-          tampering with stored evaluation records. These are two distinct mechanisms — a valid audit hash is not a
-          substitute for a valid ZK proof, and vice versa.
+          tampering with stored evaluation records. These are two distinct mechanisms.
         </p>
+        
         <div className="status-strip">
-          <span className={apiUp ? "pill ok" : "pill fail"}>{apiUp ? "Backend online" : "Backend offline"}</span>
+          <div className={apiUp ? "pill ok" : "pill fail"}>
+            {apiUp ? <CheckCircle2 size={16} /> : <XCircle size={16} />}
+            {apiUp ? "Backend Online" : "Backend Offline"}
+          </div>
+          
           {commitment && (
-            <span className="pill">
-              Certified model: {commitment.model_version} · <span className="mono">{commitment.commitment.slice(0, 20)}...</span>
-            </span>
+            <div className="pill">
+              <ShieldCheck size={16} className="panel-icon" />
+              Certified Model: {commitment.model_version} 
+              <span className="mono" style={{ opacity: 0.7, marginLeft: 4 }}>
+                ({commitment.commitment.slice(0, 12)}...)
+              </span>
+            </div>
           )}
-          <span className="pill">
+          
+          <div className="pill">
+            <Box size={16} className="panel-icon" />
             Pipelines: {evaluatorInfo?.evaluators?.map((item) => item.evaluatorType.toUpperCase()).join(" / ") || "OMR / LLM"}
-          </span>
+          </div>
         </div>
-      </header>
+      </motion.header>
 
-      <main>
-        <EvaluationPanel evaluatorInfo={evaluatorInfo} evalType={evalType} setEvalType={setEvalType} onEvaluated={(evaluation) => setLastEvaluationId(evaluation.evaluationId)} />
-        <VerificationPanel lastEvaluationId={lastEvaluationId} />
-        <TamperTestPanel evalType={evalType} />
-      </main>
+      <motion.main
+        variants={containerVariants}
+        initial="hidden"
+        animate="visible"
+      >
+        <motion.div variants={itemVariants}>
+          <EvaluationPanel evaluatorInfo={evaluatorInfo} evalType={evalType} setEvalType={setEvalType} onEvaluated={(evaluation) => setLastEvaluationId(evaluation.evaluationId)} />
+        </motion.div>
+        
+        <motion.div variants={itemVariants} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <VerificationPanel lastEvaluationId={lastEvaluationId} />
+          <TamperTestPanel evalType={evalType} />
+        </motion.div>
+      </motion.main>
     </div>
   );
 }
