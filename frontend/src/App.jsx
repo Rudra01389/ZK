@@ -47,10 +47,9 @@ function App() {
       >
         <h1>CertiProof</h1>
         <p className="tagline">Cryptographically Verifiable AI-Based Exam Evaluation</p>
-        <p className="muted">
+        <p className="muted" style={{ fontSize: '1.15rem', lineHeight: '1.6', opacity: 0.95, maxWidth: '750px', margin: '0 auto' }}>
           Zero-knowledge proof layer (EZKL / Halo2) proves the certified model produced the claimed score, without
-          revealing model weights or the candidate's raw answers. A separate hash-linked audit layer detects
-          tampering with stored evaluation records. These are two distinct mechanisms.
+          revealing model weights or the candidate's raw answers.
         </p>
         
         <div className="status-strip">

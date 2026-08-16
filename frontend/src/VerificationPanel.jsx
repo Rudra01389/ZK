@@ -48,8 +48,7 @@ export default function VerificationPanel({ lastEvaluationId }) {
     <section className="panel">
       <h2><Shield className="panel-icon" /> 2. Verification</h2>
       <p className="muted">
-        Verifies an evaluation using only public artifacts — never
-        the model's private weights or the candidate's raw answers.
+        Validates evaluation authenticity entirely through public zero-knowledge proofs and audit commitments, guaranteeing zero disclosure of proprietary weights or candidate answers.
       </p>
 
       <div className="row">
