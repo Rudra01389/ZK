@@ -1,0 +1,11 @@
+{
+  "model_version": "omr-scorer-v1",
+  "commitment": "sha256:3415ff10778fb5a2a345ddfa7024a4dd54b07c021456efa6d6d5aa777176afcc",
+  "component_hashes": {
+    "onnx": "c4a99b53b27373a68879d60754581ff4aedb4d7922c1c121b058f0927e2ec4b8",
+    "settings": "61701c17b15bb5e30a1284167621bbf06e18d1caca7c7e60350849280349f6cb",
+    "compiled_circuit": "6297d1136588a61d6a20eaa38d5ae17a63026697b1b6685d65122fe433ca65d2",
+    "verification_key": "65a66d9598d16809ea40051d1ee046e70093fb2d9b181cfc0fa97cec511712a6"
+  },
+  "certified_at": "2026-08-16T06:21:36Z"
+}
