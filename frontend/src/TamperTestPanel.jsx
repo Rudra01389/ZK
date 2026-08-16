@@ -11,14 +11,14 @@ const SCENARIOS = [
   { key: "wrong-batch", label: "Wrong Batch", expect: "INVALID" },
 ];
 
-export default function TamperTestPanel() {
+export default function TamperTestPanel({ evalType }) {
   const [running, setRunning] = useState(null);
   const [results, setResults] = useState({});
 
   const runScenario = async (key) => {
     setRunning(key);
     try {
-      const data = await api.tamper(key);
+      const data = await api.tamper(key, { evaluatorType: evalType });
       setResults((prev) => ({ ...prev, [key]: data }));
     } catch (e) {
       setResults((prev) => ({ ...prev, [key]: { error: e.message, valid: false } }));

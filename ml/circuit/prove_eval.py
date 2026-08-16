@@ -27,19 +27,9 @@ import time
 import uuid
 
 import ezkl
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model"))
-from config import INPUT_DIM, NUM_OPTIONS, NUM_QUESTIONS  # noqa: E402
-from train import one_hot_answers  # noqa: E402
+import numpy as np
 
 CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
-ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
-COMPILED_PATH = os.path.join(ARTIFACTS_DIR, "model.compiled")
-SRS_PATH = os.path.join(ARTIFACTS_DIR, "kzg.srs")
-VK_PATH = os.path.join(ARTIFACTS_DIR, "vk.key")
-PK_PATH = os.path.join(ARTIFACTS_DIR, "pk.key")
-
-PROOFS_DIR = os.path.join(ARTIFACTS_DIR, "proofs")
 
 
 async def _maybe_await(result):
@@ -48,29 +38,59 @@ async def _maybe_await(result):
     return result
 
 
-async def run(answers):
+def _omr_input(answers):
+    sys.path.insert(0, os.path.join(CIRCUIT_DIR, "..", "model"))
+    from config import NUM_OPTIONS, NUM_QUESTIONS  # noqa: E402
+    from train import one_hot_answers  # noqa: E402
+
     if len(answers) != NUM_QUESTIONS or any(a < 0 or a >= NUM_OPTIONS for a in answers):
         raise ValueError(f"answers must be {NUM_QUESTIONS} ints in [0,{NUM_OPTIONS - 1}]")
 
-    import numpy as np
+    return one_hot_answers(np.array(answers, dtype=np.int64))
 
-    os.makedirs(PROOFS_DIR, exist_ok=True)
+
+def _llm_input(answer_text):
+    sys.path.insert(0, os.path.join(CIRCUIT_DIR, "..", "llm_model"))
+    from tokenizer import encode_one_hot, tokenize_text  # noqa: E402
+
+    tokens = tokenize_text(answer_text)
+    return np.array(encode_one_hot(tokens), dtype=np.float32).reshape(-1)
+
+
+def _label_for_class(idx):
+    return ["Excellent", "Good", "Partial", "Poor"][idx]
+
+
+async def run(payload):
+    evaluator_type = payload.get("evaluator_type", "omr")
+    artifacts_dir = os.path.join(CIRCUIT_DIR, "artifacts_llm" if evaluator_type == "llm" else "artifacts")
+    compiled_path = os.path.join(artifacts_dir, "model.compiled")
+    srs_path = os.path.join(artifacts_dir, "kzg.srs")
+    vk_path = os.path.join(artifacts_dir, "vk.key")
+    pk_path = os.path.join(artifacts_dir, "pk.key")
+    proofs_dir = os.path.join(artifacts_dir, "proofs")
+
+    if evaluator_type == "llm":
+        vec = _llm_input(payload["answer_text"])
+    else:
+        vec = _omr_input(payload["answers"])
+
+    os.makedirs(proofs_dir, exist_ok=True)
     run_id = uuid.uuid4().hex[:12]
-    input_path = os.path.join(PROOFS_DIR, f"input_{run_id}.json")
-    witness_path = os.path.join(PROOFS_DIR, f"witness_{run_id}.json")
-    proof_path = os.path.join(PROOFS_DIR, f"proof_{run_id}.json")
+    input_path = os.path.join(proofs_dir, f"input_{run_id}.json")
+    witness_path = os.path.join(proofs_dir, f"witness_{run_id}.json")
+    proof_path = os.path.join(proofs_dir, f"proof_{run_id}.json")
 
-    vec = one_hot_answers(np.array(answers, dtype=np.int64))
     with open(input_path, "w") as f:
         json.dump({"input_data": [vec.tolist()]}, f)
 
     t0 = time.time()
     witness = await _maybe_await(
-        ezkl.gen_witness(input_path, COMPILED_PATH, witness_path, VK_PATH, SRS_PATH)
+        ezkl.gen_witness(input_path, compiled_path, witness_path, vk_path, srs_path)
     )
     t1 = time.time()
 
-    ok = await _maybe_await(ezkl.prove(witness_path, COMPILED_PATH, PK_PATH, proof_path, SRS_PATH))
+    ok = await _maybe_await(ezkl.prove(witness_path, compiled_path, pk_path, proof_path, srs_path))
     t2 = time.time()
     if not ok:
         raise RuntimeError("ezkl.prove returned falsy")
@@ -81,13 +101,14 @@ async def run(answers):
     # public instances: [input_commitment_hash..., score]
     # ezkl encodes public instances as field elements; decode the score
     # (last public output) back to float using the circuit's output scale.
-    with open(os.path.join(ARTIFACTS_DIR, "settings.json")) as f:
+    with open(os.path.join(artifacts_dir, "settings.json")) as f:
         settings = json.load(f)
     output_scale = settings["model_output_scales"][0]
 
     pretty_public = proof_json.get("pretty_public_inputs", {})
     rescaled_outputs = pretty_public.get("rescaled_outputs", [[]])
-    score = float(rescaled_outputs[0][0]) if rescaled_outputs and rescaled_outputs[0] else None
+    output_values = [float(v) for v in rescaled_outputs[0]] if rescaled_outputs and rescaled_outputs[0] else []
+    score = output_values[0] if output_values else None
 
     input_commitment_felts = pretty_public.get("processed_inputs", [[]])
     input_commitment = input_commitment_felts[0][0] if input_commitment_felts and input_commitment_felts[0] else None
@@ -107,10 +128,14 @@ async def run(answers):
         },
         "proof_size_bytes": proof_size,
     }
+    if evaluator_type == "llm":
+        grade_idx = int(np.argmax(np.array(output_values))) if output_values else None
+        result["grade_logits"] = output_values
+        result["claimed_grade"] = _label_for_class(grade_idx) if grade_idx is not None else None
     print(json.dumps(result))
     return result
 
 
 if __name__ == "__main__":
     payload = json.loads(sys.argv[1])
-    asyncio.run(run(payload["answers"]))
+    asyncio.run(run(payload))

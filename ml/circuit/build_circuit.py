@@ -31,15 +31,28 @@ import sys
 import ezkl
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model"))
-from config import INPUT_DIM, NUM_OPTIONS, NUM_QUESTIONS  # noqa: E402
-from train import generate_answer_key, one_hot_answers, synthetic_dataset  # noqa: E402
+import sys
+
+USE_LLM = "--llm" in sys.argv
+
+if USE_LLM:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm_model"))
+    from config import VOCAB_SIZE, MAX_SEQ_LEN  # type: ignore # noqa: E402
+else:
+    sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model"))
+    from config import INPUT_DIM, NUM_OPTIONS, NUM_QUESTIONS  # type: ignore # noqa: E402
+    from train import generate_answer_key, one_hot_answers, synthetic_dataset  # type: ignore # noqa: E402
 
 CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "model")
-ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
+if USE_LLM:
+    MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "llm_model")
+    ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts_llm")
+    ONNX_PATH = os.path.join(MODEL_DIR, "llm_scorer.onnx")
+else:
+    MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "model")
+    ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
+    ONNX_PATH = os.path.join(MODEL_DIR, "answer_scorer.onnx")
 
-ONNX_PATH = os.path.join(MODEL_DIR, "answer_scorer.onnx")
 SETTINGS_PATH = os.path.join(ARTIFACTS_DIR, "settings.json")
 CALIBRATION_PATH = os.path.join(ARTIFACTS_DIR, "calibration.json")
 COMPILED_PATH = os.path.join(ARTIFACTS_DIR, "model.compiled")
@@ -55,17 +68,17 @@ async def _maybe_await(result):
 
 
 def _write_calibration_data():
-    answer_key = generate_answer_key(42)
-    xs, _ = synthetic_dataset(answer_key, n_samples=32, seed=99)
-    payload = {"input_data": [xs.reshape(-1).tolist()]}
-    # ezkl calibration data expects one flattened array per input tensor;
-    # we provide several representative candidate answer sheets concatenated
-    # is not correct -- instead write multiple candidate samples as separate
-    # calibration runs by using the first sample, then a batch-style file
-    # with many rows is not supported for calibrate_settings (single input).
-    # So we just calibrate against a representative single sample and rely
-    # on default lookup ranges (0/1 one-hot input) which are already tight.
-    single = {"input_data": [xs[0].tolist()]}
+    if USE_LLM:
+        import sys
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "llm_model"))
+        from train import generate_synthetic_data  # type: ignore # noqa: E402
+        xs, _ = generate_synthetic_data(1)
+        single = {"input_data": [xs[0].tolist()]}
+    else:
+        answer_key = generate_answer_key(42)
+        xs, _ = synthetic_dataset(answer_key, n_samples=32, seed=99)
+        single = {"input_data": [xs[0].tolist()]}
+    
     with open(CALIBRATION_PATH, "w") as f:
         json.dump(single, f)
 
@@ -98,7 +111,12 @@ async def build():
     assert ok, "compile_circuit failed"
 
     print("[5/6] get_srs ...")
-    ok = await _maybe_await(ezkl.get_srs(SETTINGS_PATH, None, SRS_PATH))
+    try:
+        ok = await _maybe_await(ezkl.get_srs(SETTINGS_PATH, None, SRS_PATH))
+    except Exception:
+        if os.path.exists(SRS_PATH):
+            os.remove(SRS_PATH)
+        ok = await _maybe_await(ezkl.get_srs(SETTINGS_PATH, None, SRS_PATH))
     assert ok, "get_srs failed"
 
     print("[6/6] setup (trusted setup: proving key + verification key) ...")

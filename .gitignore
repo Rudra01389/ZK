@@ -1,19 +1,47 @@
+# Environment & Virtual Environments
 .venv/
+venv/
+env/
+.env
+.env.*
+
+# Editor & OS Files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Dependencies & Build Output
 node_modules/
 dist/
+build/
 *.log
+server.log
+
+# Python Cache
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
 
-# Proving key is ~300MB and fully reproducible via ml/circuit/build_circuit.py
-ml/circuit/artifacts/pk.key
-ml/circuit/artifacts/tmp/
-ml/circuit/artifacts/proofs/
+# Temporary & Dummy Benchmark Artifacts
+dummy.*
+dummy_*
 
-# Per-run evaluation/audit data is synthetic demo output, regenerated on each run
+# EZKL Proving Keys & Temporary Execution Files (Heavy binary files fully reproducible via build_circuit.py)
+ml/circuit/artifacts*/pk.key
+ml/circuit/artifacts*/tmp/
+ml/circuit/artifacts*/proofs/
+*.pk
+
+# Per-run evaluation/audit data (synthetic demo output, regenerated on each run)
 backend/data/evaluations/*.json
 backend/data/audit/*.json
 !backend/data/evaluations/.gitkeep
 !backend/data/audit/.gitkeep
 
-.DS_Store

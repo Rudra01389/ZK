@@ -9,11 +9,19 @@ function App() {
   const [commitment, setCommitment] = useState(null);
   const [lastEvaluationId, setLastEvaluationId] = useState(null);
   const [apiUp, setApiUp] = useState(null);
+  const [evaluatorInfo, setEvaluatorInfo] = useState(null);
+  const [evalType, setEvalType] = useState("omr");
 
   useEffect(() => {
     api.health().then(() => setApiUp(true)).catch(() => setApiUp(false));
-    api.modelCommitment().then(setCommitment).catch(() => {});
+    api.evaluator().then((info) => {
+      setEvaluatorInfo(info);
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    api.modelCommitment(evalType).then(setCommitment).catch(() => {});
+  }, [evalType]);
 
   return (
     <div className="app">
@@ -33,13 +41,16 @@ function App() {
               Certified model: {commitment.model_version} · <span className="mono">{commitment.commitment.slice(0, 20)}...</span>
             </span>
           )}
+          <span className="pill">
+            Pipelines: {evaluatorInfo?.evaluators?.map((item) => item.evaluatorType.toUpperCase()).join(" / ") || "OMR / LLM"}
+          </span>
         </div>
       </header>
 
       <main>
-        <EvaluationPanel onEvaluated={(evaluation) => setLastEvaluationId(evaluation.evaluationId)} />
+        <EvaluationPanel evaluatorInfo={evaluatorInfo} evalType={evalType} setEvalType={setEvalType} onEvaluated={(evaluation) => setLastEvaluationId(evaluation.evaluationId)} />
         <VerificationPanel lastEvaluationId={lastEvaluationId} />
-        <TamperTestPanel />
+        <TamperTestPanel evalType={evalType} />
       </main>
     </div>
   );

@@ -1,0 +1,12 @@
+{
+  "model_version": "llm-scorer-v1",
+  "commitment": "sha256:11b5aa111e2118d6edbccb6b731aa8bcb52420afa5d66e672120779f08463d84",
+  "component_hashes": {
+    "onnx": "57df320834708cf433be6f44ece802207b3ae439fccf5cb18f30d94c1fc31db0",
+    "settings": "33dd72a31c5259525a001d24945351cb24851a2395024fd2661c50d1f1657627",
+    "compiled_circuit": "79d5df2ce6f059dc769dde3c109fa3990446d5728d1844da69267cd1c0c31216",
+    "verification_key": "c320cfe8af1c22e7b273a2466e0e6d53e22d52570f8c52171933623db68de5ac",
+    "tokenizer_config": "e760371770ff5a9a53a8b813d42818b87b74cfaa24dbc52c357145354def5ca3"
+  },
+  "certified_at": "2026-08-16T15:05:27Z"
+}
