@@ -1,4 +1,6 @@
-# Cryptographically Verifiable AI-Based Exam Evaluation
+# CertiProof
+
+**Cryptographically Verifiable AI-Based Exam Evaluation**
 
 Hackathon MVP: a real zkML proof pipeline (EZKL / Halo2) for a small OMR
 answer-scoring model, plus a hash-linked audit layer, wired into a
