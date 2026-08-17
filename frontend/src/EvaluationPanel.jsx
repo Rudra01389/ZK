@@ -1,24 +1,27 @@
 import { useState } from "react";
 import { api } from "./api";
+import { motion, AnimatePresence } from "framer-motion";
+import { Cpu, RefreshCcw, Check, X, FileText, Loader2, Sparkles, Hash, Clock, FileBadge } from "lucide-react";
+import TerminalLogger from "./TerminalLogger";
 
 const NUM_QUESTIONS = 20;
 const OPTIONS = ["A", "B", "C", "D"];
-// Demo convenience only: the certified synthetic answer key, so a judge can
-// one-click a perfect score. This is training-label data for a synthetic
-// demo, not real candidate or exam data.
 const DEMO_CORRECT_KEY = [0, 3, 2, 1, 1, 3, 0, 2, 0, 0, 2, 3, 2, 3, 2, 3, 2, 0, 3, 1];
 
 function randomAnswers() {
   return Array.from({ length: NUM_QUESTIONS }, () => Math.floor(Math.random() * 4));
 }
 
-export default function EvaluationPanel({ onEvaluated }) {
+export default function EvaluationPanel({ evaluatorInfo, evalType, setEvalType, onEvaluated }) {
   const [candidateId, setCandidateId] = useState("SYN-CAND-" + Math.floor(1000 + Math.random() * 9000));
   const [batchId, setBatchId] = useState("batch-2026-demo");
+  const [textAnswer, setTextAnswer] = useState("Zero-knowledge proofs allow a prover to convince a verifier that a statement is true without revealing any information beyond the validity of the statement itself.");
   const [answers, setAnswers] = useState(randomAnswers());
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+
+  const selectedStatus = evaluatorInfo?.evaluators?.find((item) => item.evaluatorType === evalType)?.status;
 
   const setAnswer = (i, val) => {
     const next = [...answers];
@@ -31,7 +34,8 @@ export default function EvaluationPanel({ onEvaluated }) {
     setError(null);
     setResult(null);
     try {
-      const data = await api.evaluate({ candidateId, batchId, answers });
+      const payloadAnswers = evalType === "llm" ? textAnswer : answers;
+      const data = await api.evaluate({ candidateId, batchId, evaluatorType: evalType, answers: payloadAnswers });
       setResult(data);
       onEvaluated?.(data.evaluation);
     } catch (e) {
@@ -43,10 +47,10 @@ export default function EvaluationPanel({ onEvaluated }) {
 
   return (
     <section className="panel">
-      <h2>1. Evaluation</h2>
+      <h2><Cpu className="panel-icon" /> 1. Evaluation</h2>
       <p className="muted">
-        Runs the certified OMR answer-scoring model on a synthetic candidate's bubble sheet, then generates a real
-        EZKL zero-knowledge proof binding the model commitment, the (private) candidate input, and the claimed score.
+        Runs the certified OMR/LLM scoring model on a candidate's submission, then generates a real
+        zero-knowledge proof binding the pipeline, private input, and output.
       </p>
 
       <div className="row">
@@ -60,47 +64,145 @@ export default function EvaluationPanel({ onEvaluated }) {
         </label>
       </div>
 
-      <div className="preset-row">
-        <button type="button" onClick={() => setAnswers(DEMO_CORRECT_KEY)}>Fill all correct (demo)</button>
-        <button type="button" onClick={() => setAnswers(randomAnswers())}>Fill random</button>
-        <button type="button" onClick={() => setAnswers(DEMO_CORRECT_KEY.map((a) => (a + 1) % 4))}>Fill all wrong</button>
+      <div className="row">
+        <label>
+          Evaluator Pipeline
+          <select
+            value={evalType}
+            onChange={(e) => setEvalType(e.target.value)}
+            disabled={loading}
+          >
+            <option value="llm">LLM (zkLLM text)</option>
+            <option value="omr">OMR (EZKL array)</option>
+          </select>
+        </label>
+        {selectedStatus && (
+          <span className={`status inline ${selectedStatus.ready ? "ok" : "fail"}`} style={{ margin: 0, marginTop: '22px' }}>
+            {selectedStatus.ready ? <Check size={14} /> : <X size={14} />}
+            {selectedStatus.ready ? "Ready" : `Missing: ${selectedStatus.missing.join(", ")}`}
+          </span>
+        )}
       </div>
 
-      <div className="answer-grid">
-        {answers.map((a, i) => (
-          <label key={i} className="answer-cell">
-            Q{i + 1}
-            <select value={a} onChange={(e) => setAnswer(i, e.target.value)}>
-              {OPTIONS.map((opt, idx) => (
-                <option key={opt} value={idx}>{opt}</option>
+      <AnimatePresence mode="wait">
+        {evalType === "omr" ? (
+          <motion.div 
+            key="omr"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+          >
+            <div className="preset-row">
+              <button type="button" onClick={() => setAnswers(DEMO_CORRECT_KEY)}>
+                <Check size={16} /> Fill Correct
+              </button>
+              <button type="button" onClick={() => setAnswers(randomAnswers())}>
+                <RefreshCcw size={16} /> Random
+              </button>
+              <button type="button" onClick={() => setAnswers(DEMO_CORRECT_KEY.map((a) => (a + 1) % 4))}>
+                <X size={16} /> All Wrong
+              </button>
+            </div>
+
+            <div className="answer-grid">
+              {answers.map((a, i) => (
+                <div key={i} className="answer-cell">
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Q{i + 1}</div>
+                  <select value={a} onChange={(e) => setAnswer(i, e.target.value)}>
+                    {OPTIONS.map((opt, idx) => (
+                      <option key={opt} value={idx}>{opt}</option>
+                    ))}
+                  </select>
+                </div>
               ))}
-            </select>
-          </label>
-        ))}
-      </div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div 
+            key="llm"
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            style={{ marginTop: '16px', overflow: 'hidden' }}
+          >
+            <label>
+              Candidate Text Answer
+              <textarea 
+                rows="4" 
+                style={{ width: '100%', marginTop: '8px', fontFamily: 'var(--font-mono, monospace)', resize: 'none' }}
+                value={textAnswer} 
+                onChange={(e) => setTextAnswer(e.target.value)} 
+              />
+            </label>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <button className="primary" onClick={runEvaluation} disabled={loading}>
-        {loading ? "Evaluating + generating ZK proof..." : "Evaluate"}
+        {loading ? (
+          <><Loader2 className="loader" size={20} /> Generating Proof...</>
+        ) : (
+          <><Sparkles size={20} /> Evaluate & Prove</>
+        )}
       </button>
 
-      {error && <div className="status fail">✗ {error}</div>}
+      {error && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="status fail">
+          <X size={18} /> {error}
+        </motion.div>
+      )}
 
       {result && (
-        <div className="result-box">
-          <div className="status ok">✓ Evaluation + proof generated</div>
+        <motion.div 
+          className="result-box"
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+        >
+          <div className="status ok" style={{ marginBottom: 16 }}>
+            <FileBadge size={18} /> Evaluation & ZK Proof Generated
+          </div>
           <dl>
-            <dt>Evaluation ID</dt><dd className="mono">{result.evaluation.evaluationId}</dd>
-            <dt>Claimed Score</dt><dd>{result.evaluation.claimedScore.toFixed(2)} / 100</dd>
-            <dt>Model Version</dt><dd>{result.evaluation.modelVersion}</dd>
-            <dt>Model Commitment</dt><dd className="mono small">{result.evaluation.modelCommitment}</dd>
-            <dt>Candidate Input Commitment</dt><dd className="mono small">{result.evaluation.inputCommitment}</dd>
-            <dt>Proof Size</dt><dd>{result.evaluation.proofSizeBytes} bytes</dd>
-            <dt>Witness Generation</dt><dd>{result.evaluation.timings_ms.witness_generation} ms</dd>
-            <dt>Proof Generation</dt><dd>{result.evaluation.timings_ms.proof_generation} ms</dd>
-            <dt>Audit Chain Index</dt><dd>#{result.audit.index} in batch "{batchId}"</dd>
+            <dt><Hash size={14} style={{ display: 'inline', verticalAlign: 'text-bottom' }}/> ID</dt>
+            <dd className="mono">{result.evaluation.evaluationId}</dd>
+            
+            <dt>{result.evaluation.gradeLogits ? "Claimed Grade" : "Claimed Score"}</dt>
+            <dd>
+              <strong style={{ color: 'var(--accent-primary)', fontSize: '1.2em' }}>
+                {typeof result.evaluation.claimedScore === "number" 
+                  ? `${result.evaluation.claimedScore.toFixed(2)} / 100` 
+                  : result.evaluation.claimedScore}
+              </strong>
+              {result.evaluation.gradeLogits && 
+                <div className="small muted">Logits: {JSON.stringify(result.evaluation.gradeLogits)}</div>
+              }
+            </dd>
+            
+            <dt>Model Version</dt>
+            <dd>{result.evaluation.modelVersion}</dd>
+            
+            <dt>Model Commit</dt>
+            <dd className="mono small">{result.evaluation.modelCommitment}</dd>
+            
+            <dt>Input Commit</dt>
+            <dd className="mono small">{result.evaluation.inputCommitment}</dd>
+            
+            <dt><FileText size={14} style={{ display: 'inline', verticalAlign: 'text-bottom' }}/> Proof Size</dt>
+            <dd>{result.evaluation.proofSizeBytes} bytes</dd>
+            
+            <dt><Clock size={14} style={{ display: 'inline', verticalAlign: 'text-bottom' }}/> Witness Gen</dt>
+            <dd>{result.evaluation.timings_ms.witness_generation} ms</dd>
+            
+            <dt><Clock size={14} style={{ display: 'inline', verticalAlign: 'text-bottom' }}/> Proof Gen</dt>
+            <dd>{result.evaluation.timings_ms.proof_generation} ms</dd>
+            
+            <dt>Audit Index</dt>
+            <dd>#{result.audit.index} in batch "{batchId}"</dd>
           </dl>
-        </div>
+        </motion.div>
       )}
+
+      {/* Live Computation Logger fills the blank space below */}
+      <TerminalLogger />
     </section>
   );
 }

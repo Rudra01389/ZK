@@ -3,11 +3,10 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const { loadCertification } = require("../services/certification");
+const { artifactsDirFor, loadCertification } = require("../services/certification");
 const zkService = require("../services/zkService");
 const { validateChain } = require("../services/auditChain");
 const { loadEvaluation } = require("../services/store");
-const { ARTIFACTS_DIR } = require("../services/paths");
 
 const router = express.Router();
 
@@ -30,16 +29,18 @@ router.post("/", async (req, res) => {
 
     const checks = {};
     const reasons = [];
+    const evaluatorType = zkService.normalizeEvaluatorType(record.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
+    const artifactsDir = artifactsDirFor(evaluatorType);
 
     // 1. Model commitment: compare the commitment stored on the evaluation
     //    record against the ONE fixed, previously-certified commitment.
-    const certification = loadCertification();
+    const certification = loadCertification(evaluatorType);
     checks.modelCommitment = record.modelCommitment === certification.commitment;
     if (!checks.modelCommitment) reasons.push("Model commitment mismatch: evaluation was not produced by the certified pipeline");
 
     // 2. Proof file integrity at rest (has the stored proof file been
     //    swapped for different bytes since it was recorded?).
-    const proofAbsPath = path.join(ARTIFACTS_DIR, record.proofFile);
+    const proofAbsPath = path.join(artifactsDir, record.proofFile);
     let proofFileIntact = false;
     if (fs.existsSync(proofAbsPath)) {
       proofFileIntact = sha256OfFile(proofAbsPath) === record.proofHash;
@@ -47,11 +48,18 @@ router.post("/", async (req, res) => {
     checks.proofFileIntact = proofFileIntact;
     if (!proofFileIntact) reasons.push("Proof file hash mismatch: stored proof file differs from the one recorded at evaluation time");
 
-    // 3. Real cryptographic ZK proof verification (EZKL) + does the public
-    //    score/input-commitment embedded in the proof match the record?
+    // 3. Real cryptographic ZK proof verification
     let zk = { proof_valid: false, score_matches_proof: false, input_commitment_matches: false };
     if (proofFileIntact) {
-      zk = await zkService.verifyProof(proofAbsPath, record.claimedScore, record.inputCommitment);
+      zk = await zkService.verifyProof(
+        {
+          proofPath: proofAbsPath,
+          claimedScore: evaluatorType === "omr" ? record.claimedScore : undefined,
+          claimedGrade: evaluatorType === "llm" ? record.claimedScore : undefined,
+          expectedInputCommitment: record.inputCommitment,
+        },
+        evaluatorType
+      );
     }
     checks.proofValid = !!zk.proof_valid;
     checks.scoreValid = !!zk.score_matches_proof;
@@ -73,6 +81,7 @@ router.post("/", async (req, res) => {
 
     res.json({
       evaluationId,
+      evaluatorType,
       candidateId: record.candidateId,
       batchId: record.batchId,
       claimedScore: record.claimedScore,

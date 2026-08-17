@@ -22,16 +22,7 @@ import uuid
 import ezkl
 import numpy as np
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "model"))
-from config import NUM_OPTIONS, NUM_QUESTIONS  # noqa: E402
-from train import one_hot_answers  # noqa: E402
-
 CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
-ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
-COMPILED_PATH = os.path.join(ARTIFACTS_DIR, "model.compiled")
-SRS_PATH = os.path.join(ARTIFACTS_DIR, "kzg.srs")
-VK_PATH = os.path.join(ARTIFACTS_DIR, "vk.key")
-TMP_DIR = os.path.join(ARTIFACTS_DIR, "tmp")
 
 
 async def _maybe_await(result):
@@ -40,21 +31,48 @@ async def _maybe_await(result):
     return result
 
 
-async def run(answers):
+def _omr_input(answers):
+    sys.path.insert(0, os.path.join(CIRCUIT_DIR, "..", "model"))
+    from config import NUM_OPTIONS, NUM_QUESTIONS  # noqa: E402
+    from train import one_hot_answers  # noqa: E402
+
     if len(answers) != NUM_QUESTIONS or any(a < 0 or a >= NUM_OPTIONS for a in answers):
         raise ValueError(f"answers must be {NUM_QUESTIONS} ints in [0,{NUM_OPTIONS - 1}]")
 
-    os.makedirs(TMP_DIR, exist_ok=True)
-    tag = uuid.uuid4().hex[:12]
-    input_path = os.path.join(TMP_DIR, f"input_{tag}.json")
-    witness_path = os.path.join(TMP_DIR, f"witness_{tag}.json")
+    return one_hot_answers(np.array(answers, dtype=np.int64))
 
-    vec = one_hot_answers(np.array(answers, dtype=np.int64))
+
+def _llm_input(answer_text):
+    sys.path.insert(0, os.path.join(CIRCUIT_DIR, "..", "llm_model"))
+    from tokenizer import encode_one_hot, tokenize_text  # noqa: E402
+
+    tokens = tokenize_text(answer_text)
+    return np.array(encode_one_hot(tokens), dtype=np.float32).reshape(-1)
+
+
+async def run(payload):
+    evaluator_type = payload.get("evaluator_type", "omr")
+    artifacts_dir = os.path.join(CIRCUIT_DIR, "artifacts_llm" if evaluator_type == "llm" else "artifacts")
+    compiled_path = os.path.join(artifacts_dir, "model.compiled")
+    srs_path = os.path.join(artifacts_dir, "kzg.srs")
+    vk_path = os.path.join(artifacts_dir, "vk.key")
+    tmp_dir = os.path.join(artifacts_dir, "tmp")
+
+    if evaluator_type == "llm":
+        vec = _llm_input(payload["answer_text"])
+    else:
+        vec = _omr_input(payload["answers"])
+
+    os.makedirs(tmp_dir, exist_ok=True)
+    tag = uuid.uuid4().hex[:12]
+    input_path = os.path.join(tmp_dir, f"input_{tag}.json")
+    witness_path = os.path.join(tmp_dir, f"witness_{tag}.json")
+
     with open(input_path, "w") as f:
         json.dump({"input_data": [vec.tolist()]}, f)
 
     witness = await _maybe_await(
-        ezkl.gen_witness(input_path, COMPILED_PATH, witness_path, VK_PATH, SRS_PATH)
+        ezkl.gen_witness(input_path, compiled_path, witness_path, vk_path, srs_path)
     )
 
     with open(witness_path) as f:
@@ -75,4 +93,4 @@ async def run(answers):
 
 if __name__ == "__main__":
     payload = json.loads(sys.argv[1])
-    asyncio.run(run(payload["answers"]))
+    asyncio.run(run(payload))

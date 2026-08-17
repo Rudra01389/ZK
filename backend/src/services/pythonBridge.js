@@ -1,17 +1,22 @@
 const { spawn } = require("child_process");
 const path = require("path");
-const { VENV_PYTHON, ML_CIRCUIT_DIR } = require("./paths");
+const EventEmitter = require("events");
+const { VENV_PYTHON, ML_CIRCUIT_DIR, ML_DIR } = require("./paths");
+
+const logEmitter = new EventEmitter();
 
 /**
  * Runs one of the ml/circuit/*.py CLI scripts, which each accept a single
  * JSON argv payload and print a single JSON object as their last stdout
  * line. Non-JSON lines (e.g. ezkl's own log output) are ignored.
  */
-function runPythonScript(scriptName, payload, { timeoutMs = 120000 } = {}) {
+function runPythonScript(scriptName, payloadOrArgs, { timeoutMs = 120000, baseDir = ML_CIRCUIT_DIR } = {}) {
   return new Promise((resolve, reject) => {
-    const scriptPath = path.join(ML_CIRCUIT_DIR, scriptName);
-    const child = spawn(VENV_PYTHON, [scriptPath, JSON.stringify(payload)], {
-      cwd: ML_CIRCUIT_DIR,
+    const scriptPath = path.join(baseDir, scriptName);
+    const args = Array.isArray(payloadOrArgs) ? payloadOrArgs : [JSON.stringify(payloadOrArgs)];
+    
+    const child = spawn(VENV_PYTHON, [scriptPath, ...args], {
+      cwd: baseDir,
     });
 
     let stdout = "";
@@ -21,8 +26,17 @@ function runPythonScript(scriptName, payload, { timeoutMs = 120000 } = {}) {
       reject(new Error(`${scriptName} timed out after ${timeoutMs}ms`));
     }, timeoutMs);
 
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.stdout.on("data", (d) => {
+      const chunk = d.toString();
+      stdout += chunk;
+      logEmitter.emit("log", chunk);
+    });
+    
+    child.stderr.on("data", (d) => {
+      const chunk = d.toString();
+      stderr += chunk;
+      logEmitter.emit("log", chunk);
+    });
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -53,4 +67,4 @@ function runPythonScript(scriptName, payload, { timeoutMs = 120000 } = {}) {
   });
 }
 
-module.exports = { runPythonScript };
+module.exports = { runPythonScript, logEmitter };

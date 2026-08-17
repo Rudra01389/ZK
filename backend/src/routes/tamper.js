@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const { loadCertification } = require("../services/certification");
+const { loadCertification, artifactsDirFor } = require("../services/certification");
 const zkService = require("../services/zkService");
 const { appendRecord, validateChain } = require("../services/auditChain");
 const {
@@ -13,7 +13,7 @@ const {
   loadAuditChain,
   saveAuditChain,
 } = require("../services/store");
-const { ARTIFACTS_DIR, ML_MODEL_DIR } = require("../services/paths");
+const { ML_MODEL_DIR } = require("../services/paths");
 
 const router = express.Router();
 
@@ -26,15 +26,16 @@ function sha256OfBuffer(buf) {
 
 // Verification logic shared with routes/verify.js, factored out so tamper
 // tests exercise the exact same real checks a normal /api/verify call does.
-async function verifyRecord(record) {
+async function verifyRecord(record, evaluatorType) {
   const checks = {};
   const reasons = [];
 
-  const certification = loadCertification();
+  const certification = loadCertification(evaluatorType);
   checks.modelCommitment = record.modelCommitment === certification.commitment;
   if (!checks.modelCommitment) reasons.push("Model commitment mismatch: evaluation was not produced by the certified pipeline");
 
-  const proofAbsPath = path.join(ARTIFACTS_DIR, record.proofFile);
+  const artifactsDir = artifactsDirFor(evaluatorType);
+  const proofAbsPath = path.join(artifactsDir, record.proofFile);
   let proofFileIntact = false;
   if (fs.existsSync(proofAbsPath)) {
     proofFileIntact = sha256OfFile(proofAbsPath) === record.proofHash;
@@ -44,7 +45,19 @@ async function verifyRecord(record) {
 
   let zk = { proof_valid: false, score_matches_proof: false, input_commitment_matches: false };
   if (proofFileIntact) {
-    zk = await zkService.verifyProof(proofAbsPath, record.claimedScore, record.inputCommitment);
+    if (evaluatorType === 'llm') {
+      zk = await zkService.verifyProof({
+        proofPath: proofAbsPath,
+        claimedGrade: record.claimedScore,
+        expectedInputCommitment: record.inputCommitment
+      }, evaluatorType);
+    } else {
+      zk = await zkService.verifyProof({
+        proofPath: proofAbsPath,
+        claimedScore: record.claimedScore,
+        expectedInputCommitment: record.inputCommitment
+      }, evaluatorType);
+    }
   }
   checks.proofValid = !!zk.proof_valid;
   checks.scoreValid = !!zk.score_matches_proof;
@@ -65,36 +78,59 @@ async function verifyRecord(record) {
   return { valid, checks, reasons, zk };
 }
 
-const CERTIFIED_ANSWERS = [0, 3, 2, 1, 1, 3, 0, 2, 0, 0, 2, 3, 2, 3, 2, 3, 2, 0, 3, 1]; // known correct answer key
+function getCertifiedInput(evaluatorType) {
+  return evaluatorType === 'llm' 
+    ? "Zero-knowledge proofs allow a prover to convince a verifier that a statement is true without revealing any information beyond the validity of the statement itself." 
+    : [0, 3, 2, 1, 1, 3, 0, 2, 0, 0, 2, 3, 2, 3, 2, 3, 2, 0, 3, 1];
+}
 
-async function makeEvaluation(candidateId, batchId, answers) {
-  const certification = loadCertification();
-  const proofResult = await zkService.generateProof(answers);
+async function makeEvaluation(candidateId, batchId, payloadOrAnswers, evaluatorType) {
+  const certification = loadCertification(evaluatorType);
+  let proofResult;
+  let inputCommitment;
+  let evaluationId = crypto.randomUUID();
+  let question = "Describe the significance of zero-knowledge proofs.";
+
+  if (evaluatorType === 'llm') {
+    const commitRes = await zkService.computeInputCommitment({ answerText: payloadOrAnswers }, evaluatorType);
+    inputCommitment = commitRes.input_commitment;
+    proofResult = await zkService.generateProof({ question, answerText: payloadOrAnswers }, evaluatorType);
+  } else {
+    proofResult = await zkService.generateProof({ answers: payloadOrAnswers }, evaluatorType);
+    inputCommitment = proofResult.input_commitment;
+    evaluationId = proofResult.run_id;
+  }
+
+  const artifactsDir = artifactsDirFor(evaluatorType);
   const proofHash = sha256OfFile(proofResult.proof_path);
-  const evaluationId = proofResult.run_id;
   const timestamp = new Date().toISOString();
   const record = {
     evaluationId,
+    evaluatorType,
     candidateId,
     batchId,
     modelVersion: certification.model_version,
     modelCommitment: certification.commitment,
-    inputCommitment: proofResult.input_commitment,
-    claimedScore: proofResult.score,
-    proofFile: path.relative(ARTIFACTS_DIR, proofResult.proof_path),
+    inputCommitment: inputCommitment,
+    claimedScore: evaluatorType === 'llm' ? proofResult.claimed_grade : proofResult.score,
+    gradeLogits: proofResult.grade_logits,
+    proofFile: path.relative(artifactsDir, proofResult.proof_path),
+    publicOutputsPath: proofResult.public_outputs_path ? path.relative(artifactsDir, proofResult.public_outputs_path) : undefined,
     proofHash,
-    timings_ms: proofResult.timings_ms,
-    proofSizeBytes: proofResult.proof_size_bytes,
+    timings_ms: proofResult.timings_ms || 0,
+    proofSizeBytes: proofResult.proof_size_bytes || 0,
     timestamp,
   };
   saveEvaluation(record);
-  require("../services/store").savePrivateEvaluation(evaluationId, { evaluationId, answers });
+  require("../services/store").savePrivateEvaluation(evaluationId, { evaluationId, input: payloadOrAnswers });
   appendRecord(batchId, {
     evaluationId,
+    evaluatorType,
     candidateId,
     modelCommitment: certification.commitment,
-    inputCommitment: proofResult.input_commitment,
-    claimedScore: proofResult.score,
+    inputCommitment: inputCommitment,
+    claimedScore: record.claimedScore,
+    gradeLogits: record.gradeLogits,
     proofHash,
     timestamp,
   });
@@ -104,9 +140,10 @@ async function makeEvaluation(candidateId, batchId, answers) {
 // Test 1 — Valid Evaluation: certified model + correct input + correct score -> VALID.
 router.post("/valid", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-valid-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-001", batchId, CERTIFIED_ANSWERS);
-    const result = await verifyRecord(record);
+    const record = await makeEvaluation("SYN-CAND-001", batchId, getCertifiedInput(evaluatorType), evaluatorType);
+    const result = await verifyRecord(record, evaluatorType);
     res.json({ scenario: "valid-evaluation", expected: "VALID", record, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -118,9 +155,10 @@ router.post("/valid", async (req, res) => {
 // real certified commitment. Verification must reject it.
 router.post("/modified-model", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-model-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-002", batchId, CERTIFIED_ANSWERS);
-    const certification = loadCertification();
+    const record = await makeEvaluation("SYN-CAND-002", batchId, getCertifiedInput(evaluatorType), evaluatorType);
+    const certification = loadCertification(evaluatorType);
 
     // Actually perturb a real copy of the ONNX weights file and hash it —
     // this is a genuine SHA-256 of different model bytes, not a fake string.
@@ -136,7 +174,7 @@ router.post("/modified-model", async (req, res) => {
 
     const tampered = { ...record, modelCommitment: forgedCommitment };
     saveEvaluation(tampered); // overwrite public record with the forged model commitment
-    const result = await verifyRecord(tampered);
+    const result = await verifyRecord(tampered, evaluatorType);
     res.json({
       scenario: "modified-model",
       expected: "INVALID",
@@ -156,24 +194,29 @@ router.post("/modified-model", async (req, res) => {
 // commitment embedded in the already-generated proof.
 router.post("/modified-input", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-input-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-003", batchId, CERTIFIED_ANSWERS);
+    const record = await makeEvaluation("SYN-CAND-003", batchId, getCertifiedInput(evaluatorType), evaluatorType);
     const priv = loadPrivateEvaluation(record.evaluationId);
 
-    const modifiedAnswers = [...priv.answers];
-    modifiedAnswers[0] = (modifiedAnswers[0] + 1) % 4; // flip candidate's first answer
+    const certifiedInput = getCertifiedInput(evaluatorType);
+    const modifiedAnswers = Array.isArray(certifiedInput) ? [...certifiedInput] : certifiedInput + " fake input";
+    if (Array.isArray(modifiedAnswers)) {
+      modifiedAnswers[0] = (modifiedAnswers[0] + 1) % 4; 
+    }
 
-    const recomputed = await zkService.computeInputCommitment(modifiedAnswers);
+    const recomputed = await zkService.computeInputCommitment(Array.isArray(modifiedAnswers) ? { answers: modifiedAnswers } : { answerText: modifiedAnswers }, evaluatorType);
+    const recomputedHash = recomputed.input_commitment || recomputed.input_sha256;
 
     res.json({
       scenario: "modified-input",
       expected: "INVALID",
       originalInputCommitment: record.inputCommitment,
-      recomputedCommitmentForModifiedInput: recomputed.input_commitment,
-      commitmentMatches: recomputed.input_commitment === record.inputCommitment,
-      valid: recomputed.input_commitment === record.inputCommitment,
+      recomputedCommitmentForModifiedInput: recomputedHash,
+      commitmentMatches: recomputedHash === record.inputCommitment,
+      valid: recomputedHash === record.inputCommitment,
       reasons:
-        recomputed.input_commitment === record.inputCommitment
+        recomputedHash === record.inputCommitment
           ? []
           : [
               "Candidate input commitment mismatch: the modified answers hash to a different Poseidon commitment than the one embedded in the existing proof — the proof does not cover this input.",
@@ -188,11 +231,13 @@ router.post("/modified-input", async (req, res) => {
 // Test 4 — Modified Score: claimedScore is edited after proof generation.
 router.post("/modified-score", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-score-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-004", batchId, CERTIFIED_ANSWERS);
-    const tampered = { ...record, claimedScore: record.claimedScore + 5 };
+    const record = await makeEvaluation("SYN-CAND-004", batchId, getCertifiedInput(evaluatorType), evaluatorType);
+    const tamperedScore = evaluatorType === 'llm' ? record.claimedScore + " manipulated" : record.claimedScore + 5;
+    const tampered = { ...record, claimedScore: tamperedScore };
     saveEvaluation(tampered);
-    const result = await verifyRecord(tampered);
+    const result = await verifyRecord(tampered, evaluatorType);
     res.json({ scenario: "modified-score", expected: "INVALID", originalScore: record.claimedScore, tamperedScore: tampered.claimedScore, record: tampered, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -206,21 +251,23 @@ router.post("/modified-score", async (req, res) => {
 // are independent.)
 router.post("/modified-proof", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-proof-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-005", batchId, CERTIFIED_ANSWERS);
+    const record = await makeEvaluation("SYN-CAND-005", batchId, getCertifiedInput(evaluatorType), evaluatorType);
 
-    const origPath = path.join(ARTIFACTS_DIR, record.proofFile);
+    const artifactsDir = artifactsDirFor(evaluatorType);
+    const origPath = path.join(artifactsDir, record.proofFile);
     const proofJson = JSON.parse(fs.readFileSync(origPath, "utf8"));
     proofJson.proof[10] = (proofJson.proof[10] + 1) % 256; // corrupt one proof byte
 
     const corruptedFileName = record.proofFile.replace(".json", "_corrupted.json");
-    const corruptedPath = path.join(ARTIFACTS_DIR, corruptedFileName);
+    const corruptedPath = path.join(artifactsDir, corruptedFileName);
     fs.writeFileSync(corruptedPath, JSON.stringify(proofJson));
     const corruptedHash = sha256OfFile(corruptedPath);
 
     const tampered = { ...record, proofFile: corruptedFileName, proofHash: corruptedHash };
     saveEvaluation(tampered);
-    const result = await verifyRecord(tampered);
+    const result = await verifyRecord(tampered, evaluatorType);
     res.json({ scenario: "modified-proof", expected: "INVALID", record: tampered, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -232,11 +279,15 @@ router.post("/modified-proof", async (req, res) => {
 // recomputing its stored hash. Hash-chain validation must detect it.
 router.post("/modified-audit-record", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const batchId = `tamper-test-audit-${Date.now()}`;
-    const r1 = await makeEvaluation("SYN-CAND-006A", batchId, CERTIFIED_ANSWERS);
-    const modifiedAnswers2 = [...CERTIFIED_ANSWERS];
-    modifiedAnswers2[5] = (modifiedAnswers2[5] + 1) % 4;
-    const r2 = await makeEvaluation("SYN-CAND-006B", batchId, modifiedAnswers2);
+    const certifiedInput = getCertifiedInput(evaluatorType);
+    const r1 = await makeEvaluation("SYN-CAND-006A", batchId, certifiedInput, evaluatorType);
+    const modifiedAnswers2 = Array.isArray(certifiedInput) ? [...certifiedInput] : certifiedInput + " added test data";
+    if (Array.isArray(modifiedAnswers2)) {
+      modifiedAnswers2[5] = (modifiedAnswers2[5] + 1) % 4;
+    }
+    const r2 = await makeEvaluation("SYN-CAND-006B", batchId, modifiedAnswers2, evaluatorType);
 
     const before = validateChain(batchId);
 
@@ -264,15 +315,17 @@ router.post("/modified-audit-record", async (req, res) => {
 // re-associated with a batch it was never actually appended to.
 router.post("/wrong-batch", async (req, res) => {
   try {
+    const evaluatorType = zkService.normalizeEvaluatorType(req.body.evaluatorType || zkService.DEFAULT_EVALUATOR_TYPE);
     const realBatchId = `tamper-test-realbatch-${Date.now()}`;
     const otherBatchId = `tamper-test-otherbatch-${Date.now()}`;
-    const record = await makeEvaluation("SYN-CAND-007", realBatchId, CERTIFIED_ANSWERS);
+    const certifiedInput = getCertifiedInput(evaluatorType);
+    const record = await makeEvaluation("SYN-CAND-007", realBatchId, certifiedInput, evaluatorType);
     // Create the "other" batch so it exists but never contains this evaluation.
-    await makeEvaluation("SYN-CAND-007-DECOY", otherBatchId, CERTIFIED_ANSWERS);
+    await makeEvaluation("SYN-CAND-007-DECOY", otherBatchId, certifiedInput, evaluatorType);
 
     const tampered = { ...record, batchId: otherBatchId };
     saveEvaluation(tampered);
-    const result = await verifyRecord(tampered);
+    const result = await verifyRecord(tampered, evaluatorType);
     res.json({ scenario: "wrong-batch", expected: "INVALID", claimedBatch: otherBatchId, actualBatch: realBatchId, record: tampered, ...result });
   } catch (err) {
     res.status(500).json({ error: err.message });

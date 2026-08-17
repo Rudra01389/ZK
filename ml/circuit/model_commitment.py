@@ -20,11 +20,18 @@ import os
 import sys
 import time
 
-CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
-MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "model")
-ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
+USE_LLM = "--llm" in sys.argv
 
-ONNX_PATH = os.path.join(MODEL_DIR, "answer_scorer.onnx")
+CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
+if USE_LLM:
+    MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "llm_model")
+    ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts_llm")
+    ONNX_PATH = os.path.join(MODEL_DIR, "llm_scorer.onnx")
+else:
+    MODEL_DIR = os.path.join(CIRCUIT_DIR, "..", "model")
+    ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
+    ONNX_PATH = os.path.join(MODEL_DIR, "answer_scorer.onnx")
+
 SETTINGS_PATH = os.path.join(ARTIFACTS_DIR, "settings.json")
 COMPILED_PATH = os.path.join(ARTIFACTS_DIR, "model.compiled")
 VK_PATH = os.path.join(ARTIFACTS_DIR, "vk.key")
@@ -42,20 +49,29 @@ def _sha256_file(path):
 def current_commitment():
     """Recompute the commitment from artifacts currently on disk."""
     parts = []
-    for path in [ONNX_PATH, SETTINGS_PATH, COMPILED_PATH, VK_PATH]:
+    
+    paths_to_hash = [ONNX_PATH, SETTINGS_PATH, COMPILED_PATH, VK_PATH]
+    if USE_LLM:
+        paths_to_hash.append(os.path.join(MODEL_DIR, "tokenizer_config.json"))
+        
+    for path in paths_to_hash:
         if not os.path.exists(path):
             raise FileNotFoundError(f"required artifact missing: {path}")
         parts.append(_sha256_file(path))
 
     combined = hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
+    comp_hashes = {
+        "onnx": parts[0],
+        "settings": parts[1],
+        "compiled_circuit": parts[2],
+        "verification_key": parts[3],
+    }
+    if USE_LLM:
+        comp_hashes["tokenizer_config"] = parts[4]
+        
     return {
         "commitment": f"sha256:{combined}",
-        "component_hashes": {
-            "onnx": parts[0],
-            "settings": parts[1],
-            "compiled_circuit": parts[2],
-            "verification_key": parts[3],
-        },
+        "component_hashes": comp_hashes,
     }
 
 

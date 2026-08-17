@@ -1,11 +1,11 @@
 {
   "model_version": "omr-scorer-v1",
-  "commitment": "sha256:3415ff10778fb5a2a345ddfa7024a4dd54b07c021456efa6d6d5aa777176afcc",
+  "commitment": "sha256:036d803443fd6f037dfe8cb0a7166e78e5d6e0e9eb159828dd84bdc28fa0897a",
   "component_hashes": {
     "onnx": "c4a99b53b27373a68879d60754581ff4aedb4d7922c1c121b058f0927e2ec4b8",
-    "settings": "61701c17b15bb5e30a1284167621bbf06e18d1caca7c7e60350849280349f6cb",
-    "compiled_circuit": "6297d1136588a61d6a20eaa38d5ae17a63026697b1b6685d65122fe433ca65d2",
-    "verification_key": "65a66d9598d16809ea40051d1ee046e70093fb2d9b181cfc0fa97cec511712a6"
+    "settings": "6e70eb0523cf96b400a2bbf95b8e3569590f9082e31c92ae71fa4b9391a81f96",
+    "compiled_circuit": "80fb556e2210896741f3751e936f83c166dbe2dca02e54a26fe5f8bd3d4c8c10",
+    "verification_key": "25def759dc9c41d37c5980d6120aaa3f2678ee3cdc2e90c878ed832ff895aa5e"
   },
-  "certified_at": "2026-08-16T06:21:36Z"
+  "certified_at": "2026-08-16T15:05:19Z"
 }

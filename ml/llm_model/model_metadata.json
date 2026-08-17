@@ -1,0 +1,10 @@
+{
+  "model_version": "2.0.0-text",
+  "architecture": "OneHot(16) -> MatMul(16) -> SumPool(/16) -> Linear(16) -> ReLU -> Linear(4)",
+  "input_format": "Flattened 1D array of shape 256 (one-hot)",
+  "output_format": "4 float logits",
+  "vocab_size": 16,
+  "max_seq_len": 16,
+  "training_samples": 4000,
+  "validation_samples": 400
+}

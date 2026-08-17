@@ -14,11 +14,13 @@ async function request(path, options) {
 
 export const api = {
   health: () => request("/health"),
-  modelCommitment: () => request("/model/commitment"),
+  evaluator: () => request("/model/evaluator"),
+  modelCommitment: (evaluatorType) =>
+    request(`/model/commitment${evaluatorType ? `?evaluatorType=${encodeURIComponent(evaluatorType)}` : ""}`),
   evaluations: () => request("/model/evaluations"),
   evaluate: (payload) => request("/evaluate", { method: "POST", body: JSON.stringify(payload) }),
   verify: (evaluationId) => request("/verify", { method: "POST", body: JSON.stringify({ evaluationId }) }),
   auditBatch: (batchId) => request(`/audit/${batchId}`),
   validateAudit: (batchId) => request(`/audit/${batchId}/validate`, { method: "POST" }),
-  tamper: (scenario) => request(`/tamper/${scenario}`, { method: "POST", body: JSON.stringify({}) }),
+  tamper: (scenario, payload) => request(`/tamper/${scenario}`, { method: "POST", body: JSON.stringify(payload || {}) }),
 };

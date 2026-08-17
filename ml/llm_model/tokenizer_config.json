@@ -1,0 +1,6 @@
+{
+  "vocab_size": 16,
+  "max_seq_len": 16,
+  "pad_token_id": 0,
+  "hash_seed": 42
+}

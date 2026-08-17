@@ -24,10 +24,10 @@ import time
 import ezkl
 
 CIRCUIT_DIR = os.path.dirname(os.path.abspath(__file__))
-ARTIFACTS_DIR = os.path.join(CIRCUIT_DIR, "artifacts")
-SETTINGS_PATH = os.path.join(ARTIFACTS_DIR, "settings.json")
-VK_PATH = os.path.join(ARTIFACTS_DIR, "vk.key")
-SRS_PATH = os.path.join(ARTIFACTS_DIR, "kzg.srs")
+
+
+def _label_for_class(idx):
+    return ["Excellent", "Good", "Partial", "Poor"][idx]
 
 
 async def _maybe_await(result):
@@ -36,12 +36,19 @@ async def _maybe_await(result):
     return result
 
 
-async def run(proof_path, claimed_score=None, expected_input_commitment=None):
+async def run(proof_path, claimed_score=None, expected_input_commitment=None, evaluator_type="omr", claimed_grade=None):
+    artifacts_dir = os.path.join(CIRCUIT_DIR, "artifacts_llm" if evaluator_type == "llm" else "artifacts")
+    settings_path = os.path.join(artifacts_dir, "settings.json")
+    vk_path = os.path.join(artifacts_dir, "vk.key")
+    srs_path = os.path.join(artifacts_dir, "kzg.srs")
+
     result = {
         "proof_valid": False,
         "score_matches_proof": None,
         "input_commitment_matches": None,
         "public_score": None,
+        "public_grade": None,
+        "grade_logits": None,
         "input_commitment": None,
         "timings_ms": {},
         "error": None,
@@ -62,17 +69,24 @@ async def run(proof_path, claimed_score=None, expected_input_commitment=None):
 
     pretty = proof_json.get("pretty_public_inputs", {})
     rescaled_outputs = pretty.get("rescaled_outputs", [[]])
-    public_score = float(rescaled_outputs[0][0]) if rescaled_outputs and rescaled_outputs[0] else None
+    output_values = [float(v) for v in rescaled_outputs[0]] if rescaled_outputs and rescaled_outputs[0] else []
+    public_score = output_values[0] if output_values else None
+    public_grade = None
+    if evaluator_type == "llm" and output_values:
+        grade_idx = max(range(len(output_values)), key=lambda i: output_values[i])
+        public_grade = _label_for_class(grade_idx)
     processed_inputs = pretty.get("processed_inputs", [[]])
     input_commitment = processed_inputs[0][0] if processed_inputs and processed_inputs[0] else None
 
     result["public_score"] = public_score
+    result["public_grade"] = public_grade
+    result["grade_logits"] = output_values if evaluator_type == "llm" else None
     result["input_commitment"] = input_commitment
 
     t0 = time.time()
     try:
         proof_valid = await _maybe_await(
-            ezkl.verify(proof_path, SETTINGS_PATH, VK_PATH, SRS_PATH)
+            ezkl.verify(proof_path, settings_path, vk_path, srs_path)
         )
     except Exception as e:  # noqa: BLE001 - surface any ezkl-side failure as invalid proof
         proof_valid = False
@@ -82,7 +96,9 @@ async def run(proof_path, claimed_score=None, expected_input_commitment=None):
     result["proof_valid"] = bool(proof_valid)
     result["timings_ms"]["verify"] = round((t1 - t0) * 1000, 2)
 
-    if claimed_score is not None and public_score is not None:
+    if evaluator_type == "llm" and claimed_grade is not None and public_grade is not None:
+        result["score_matches_proof"] = claimed_grade == public_grade
+    elif claimed_score is not None and public_score is not None:
         result["score_matches_proof"] = abs(float(claimed_score) - public_score) < 1e-6
 
     if expected_input_commitment is not None and input_commitment is not None:
@@ -99,5 +115,7 @@ if __name__ == "__main__":
             payload["proof_path"],
             payload.get("claimed_score"),
             payload.get("expected_input_commitment"),
+            payload.get("evaluator_type", "omr"),
+            payload.get("claimed_grade"),
         )
     )
